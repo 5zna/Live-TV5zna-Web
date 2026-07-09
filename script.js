@@ -8,8 +8,7 @@ function setStatus(text, type) {
 }
 
 const isHttps = location.protocol === 'https:';
-const PROXY = isHttps ? 'https://corsproxy.io/?' : '';
-const STREAM_PROXY_URL = PROXY + encodeURIComponent(STREAM_URL);
+const PROXY_URL = isHttps ? '/api/stream' : STREAM_URL;
 
 let player = null;
 
@@ -49,4 +48,4 @@ function playStream(url) {
 }
 
 setStatus('Connecting...');
-playStream(STREAM_PROXY_URL);
+playStream(PROXY_URL);
