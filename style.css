@@ -1,0 +1,108 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #0a0a0f;
+  color: #e0e0e0;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.container {
+  width: 100%;
+  max-width: 960px;
+  padding: 20px;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.header h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #fff;
+}
+
+.live-badge {
+  display: inline-block;
+  background: #ff0040;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 4px;
+  vertical-align: middle;
+  margin-left: 6px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.player-wrapper {
+  position: relative;
+  background: #000;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 0 40px rgba(255, 0, 64, 0.15), 0 0 80px rgba(0, 0, 0, 0.8);
+  border: 1px solid #1a1a2e;
+}
+
+.video-player {
+  width: 100%;
+  display: block;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  object-fit: contain;
+}
+
+.controls-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 12px 16px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+  pointer-events: none;
+}
+
+.status {
+  font-size: 0.8rem;
+  color: #aaa;
+  font-weight: 500;
+}
+
+.status.connected {
+  color: #00ff88;
+}
+
+.status.error {
+  color: #ff4444;
+}
+
+.info {
+  text-align: center;
+  margin-top: 16px;
+  font-size: 0.8rem;
+  color: #555;
+  font-family: monospace;
+}
+
+.info span {
+  background: #111;
+  padding: 4px 12px;
+  border-radius: 4px;
+  border: 1px solid #1a1a2e;
+}
