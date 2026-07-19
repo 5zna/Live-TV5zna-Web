@@ -1,4 +1,4 @@
-var STREAM_URL = 'http://ugeen.live:8080/Ugeen_VIPtHEG0y/1hLFbj/4526';
+var STREAM_URL = 'http://ugeen.live:8080/Ugeen_VIPtHEG0y/1hLFbj/4530';
 var video = document.getElementById('video');
 var statusEl = document.getElementById('status');
 var playBtn = document.getElementById('playBtn');
