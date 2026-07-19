@@ -26,11 +26,14 @@ body {
 }
 
 .header h1 {
-  font-size: 2rem;
+  font-size: 1.6rem;
   font-weight: 700;
-  letter-spacing: 2px;
-  text-transform: uppercase;
   color: #fff;
+}
+
+.arabic-title {
+  font-family: 'Segoe UI', 'Arial', sans-serif;
+  direction: rtl;
 }
 
 .live-badge {
@@ -90,6 +93,38 @@ body {
 
 .status.error {
   color: #ff4444;
+}
+
+.play-btn {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.9);
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 1.8rem;
+  cursor: pointer;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, transform 0.2s;
+  backdrop-filter: blur(4px);
+  line-height: 1;
+}
+
+.play-btn:hover {
+  background: rgba(255, 0, 64, 0.7);
+  transform: translate(-50%, -50%) scale(1.1);
+}
+
+.play-btn.hidden {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .info {
