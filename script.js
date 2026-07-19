@@ -231,15 +231,8 @@ function handlePlayerClick(e) {
   } else if (isConnecting) {
     // 2. Currently connecting: Ignore click to prevent aborting/restarting the connection
     console.log('Stream is connecting. Ignoring click.');
-  } else if (streamStarted) {
-    // 3. Playback active: standard play/pause toggle
-    if (video.paused) {
-      video.muted = false;
-      video.play().catch(function() {});
-    } else {
-      video.pause();
-    }
   }
+  // 3. Playback active: Let native controls handle play, pause, and mute.
 }
 
 // Bind click event to the player wrapper (landing area)
