@@ -1,30 +1,43 @@
-export const config = {
-  runtime: 'edge',
-};
+import http from 'http';
 
-const STREAM_URL = 'http://ugeen.live:8080/Ugeen_VIPtHEG0y/1hLFbj/4526';
-
-export default async function handler(req) {
+export default function handler(req, res) {
   if (req.method !== 'GET') {
-    return new Response('Method not allowed', { status: 405 });
+    res.writeHead(405, { 'Content-Type': 'text/plain' });
+    res.end('Method not allowed');
+    return;
   }
 
-  try {
-    const resp = await fetch(STREAM_URL, { redirect: 'follow' });
+  var STREAM_URL = 'http://ugeen.live:8080/Ugeen_VIPtHEG0y/1hLFbj/4526';
 
-    if (!resp.ok && resp.status !== 200) {
-      return new Response('Stream unavailable', { status: 502 });
+  var proxyReq = http.get(STREAM_URL, function(proxyRes) {
+    if (proxyRes.statusCode !== 200) {
+      res.writeHead(502, { 'Content-Type': 'text/plain' });
+      res.end('Stream unavailable. Status code: ' + proxyRes.statusCode);
+      return;
     }
 
-    return new Response(resp.body, {
-      status: 200,
-      headers: {
-        'Content-Type': 'video/MP2T',
-        'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'no-cache',
-      },
+    res.writeHead(200, {
+      'Content-Type': 'video/MP2T',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      'Connection': 'keep-alive'
     });
-  } catch {
-    return new Response('Proxy error', { status: 502 });
-  }
+
+    proxyRes.pipe(res);
+  });
+
+  proxyReq.on('error', function(err) {
+    console.error('Proxy error:', err);
+    try {
+      res.writeHead(502, { 'Content-Type': 'text/plain' });
+      res.end('Proxy error: ' + err.message);
+    } catch (e) {}
+  });
+
+  // Critical: close the upstream connection if the user closes the stream/tab
+  req.on('close', function() {
+    proxyReq.destroy();
+  });
 }
