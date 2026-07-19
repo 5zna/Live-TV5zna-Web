@@ -1,7 +1,7 @@
 var STREAM_URL = 'http://ugeen.live:8080/Ugeen_VIPtHEG0y/1hLFbj/4527';
 var video = document.getElementById('video');
 var statusEl = document.getElementById('status');
-var playBtn = document.getElementById('playBtn');
+var playerWrapper = document.querySelector('.player-wrapper');
 
 function setStatus(text, type) {
   statusEl.textContent = text;
@@ -13,11 +13,13 @@ var PROXY_URL = isHttps ? '/api/stream' : STREAM_URL;
 
 var player = null;
 var streamStarted = false;
+var connectionStarted = false; // Has the user clicked to start the connection?
+var isConnecting = false;       // Is it currently in the loading/connecting phase?
 var currentAttempt = 0;
 var retryTimeout = null;
-var lastPlayTime = 0; // Global debounce tracker
+var lastPlayTime = 0;
 
-// Smart TV Detection (ES5 compatible)
+// Smart TV Detection
 var ua = navigator.userAgent.toLowerCase();
 var isSmartTV = ua.indexOf('smarttv') > -1 || 
                 ua.indexOf('tizen') > -1 || 
@@ -31,7 +33,7 @@ var isSmartTV = ua.indexOf('smarttv') > -1 ||
 
 console.log('Device Type: ' + (isSmartTV ? 'Smart TV' : 'PC/Mobile'));
 
-// Define the playback methods (TVs prioritize Native Direct, PCs prioritize MPEGTS Proxy)
+// Define the playback methods to try in sequence
 var PLAYBACK_METHODS = [];
 if (isSmartTV) {
   PLAYBACK_METHODS = [
@@ -63,11 +65,10 @@ function destroyPlayer() {
     player = null;
   }
   
-  // Reset native video element state
   video.removeAttribute('src');
   try {
     video.load();
-  } catch (e) { }
+  } catch (e) {}
   
   streamStarted = false;
 }
@@ -80,7 +81,6 @@ function tryNextPlaybackMethod(isUserGesture) {
 
   destroyPlayer();
 
-  // Wrap around if we exhausted all methods
   if (currentAttempt >= PLAYBACK_METHODS.length) {
     currentAttempt = 0;
   }
@@ -98,10 +98,10 @@ function tryNextPlaybackMethod(isUserGesture) {
   }
 
   console.log('Attempting playback method ' + (currentAttempt + 1) + '/' + PLAYBACK_METHODS.length + ': ' + method.name);
-  setStatus('Connecting (' + method.name + ')...');
+  
+  // Keep the user-facing status simple and clean
+  setStatus('جاري الاتصال...', 'connecting');
 
-  // If triggered by a user gesture, unmute the video to play with audio.
-  // Otherwise, mute it to ensure autoplay works.
   video.muted = !isUserGesture;
 
   if (method.useMpegts && typeof mpegts !== 'undefined' && mpegts.isSupported()) {
@@ -120,41 +120,35 @@ function tryNextPlaybackMethod(isUserGesture) {
       player.attachMediaElement(video);
       player.load();
 
-      // Listen to mpegts events
-      player.on(mpegts.Events.ERROR, function (errorType, errorDetail, errorInfo) {
+      player.on(mpegts.Events.ERROR, function(errorType, errorDetail, errorInfo) {
         console.error('MPEGTS Error in ' + method.name + ':', errorType, errorDetail, errorInfo);
         scheduleNextAttempt();
       });
 
-      player.on(mpegts.Events.STATISTICS_INFO, function () {
+      player.on(mpegts.Events.STATISTICS_INFO, function() {
         if (!streamStarted) {
           streamStarted = true;
+          isConnecting = false;
           setStatus('Live', 'connected');
-          playBtn.classList.add('hidden');
         }
       });
 
-      player.on(mpegts.Events.LOADING_COMPLETE, function () {
+      player.on(mpegts.Events.LOADING_COMPLETE, function() {
         console.log('MPEGTS Loading complete in ' + method.name);
         scheduleNextAttempt();
       });
 
-      // Try playing - isolate play() call to prevent blocking on autoplay rejection
       try {
         var playPromise = video.play();
         if (playPromise !== undefined && typeof playPromise.then === 'function') {
-          playPromise.then(function () {
+          playPromise.then(function() {
             console.log('Playing successfully using ' + method.name);
-          }).catch(function (err) {
-            console.log('Autoplay blocked for ' + method.name + ':', err.message);
-            playBtn.classList.remove('hidden');
-            playBtn.textContent = '▶';
+          }).catch(function(err) {
+            console.log('Autoplay blocked/failed for ' + method.name + ':', err.message);
           });
         }
       } catch (playError) {
         console.log('Autoplay blocked synchronously for ' + method.name + ':', playError);
-        playBtn.classList.remove('hidden');
-        playBtn.textContent = '▶';
       }
 
     } catch (e) {
@@ -162,36 +156,34 @@ function tryNextPlaybackMethod(isUserGesture) {
       scheduleNextAttempt();
     }
   } else {
-    // Native HTML5 video player fallback
+    // Native HTML5 fallback
     try {
       video.src = method.url;
       video.load();
 
-      video.onloadeddata = function () {
+      video.onloadeddata = function() {
         try {
           var playPromise = video.play();
           if (playPromise !== undefined && typeof playPromise.then === 'function') {
-            playPromise.then(function () {
+            playPromise.then(function() {
               console.log('Playing successfully using native ' + method.name);
               streamStarted = true;
+              isConnecting = false;
               setStatus('Live (Native)', 'connected');
-              playBtn.classList.add('hidden');
-            }).catch(function (err) {
-              console.log('Native autoplay blocked for ' + method.name + ':', err.message);
-              playBtn.classList.remove('hidden');
+            }).catch(function(err) {
+              console.log('Native play blocked for ' + method.name + ':', err.message);
             });
           } else {
             streamStarted = true;
+            isConnecting = false;
             setStatus('Live (Native)', 'connected');
-            playBtn.classList.add('hidden');
           }
         } catch (playError) {
-          console.log('Native autoplay blocked synchronously for ' + method.name + ':', playError);
-          playBtn.classList.remove('hidden');
+          console.log('Native play blocked synchronously for ' + method.name + ':', playError);
         }
       };
 
-      video.onerror = function (err) {
+      video.onerror = function(err) {
         console.error('Native video error in ' + method.name + ':', video.error ? video.error.code : err);
         scheduleNextAttempt();
       };
@@ -206,10 +198,11 @@ function tryNextPlaybackMethod(isUserGesture) {
 function scheduleNextAttempt() {
   if (retryTimeout) return;
   
-  setStatus('Buffering / Reconnecting...');
+  // Keep displaying connecting/loading status to avoid confusing the user
+  setStatus('جاري الاتصال...', 'connecting');
   
-  // Wait 8 seconds to allow buffering
-  retryTimeout = setTimeout(function () {
+  // Wait 8 seconds before trying next method silently
+  retryTimeout = setTimeout(function() {
     retryTimeout = null;
     currentAttempt++;
     tryNextPlaybackMethod(false);
@@ -217,91 +210,70 @@ function scheduleNextAttempt() {
 }
 
 // ============================================================
-// PLAY BUTTON HANDLER (ES5 compliant with internal debounce)
+// PLAYER CLICK HANDLER (Single Action)
 // ============================================================
-function handlePlayAction(e) {
-  // Prevent duplicate events (e.g. touchstart + click) firing within 800ms
+function handlePlayerClick(e) {
   var now = Date.now();
   if (now - lastPlayTime < 800) {
-    console.log('Duplicate play trigger ignored.');
-    if (e) {
-      if (typeof e.preventDefault === 'function') e.preventDefault();
-      if (typeof e.stopPropagation === 'function') e.stopPropagation();
-    }
+    if (e) e.preventDefault();
     return;
   }
   lastPlayTime = now;
 
-  if (e) {
-    if (typeof e.preventDefault === 'function') e.preventDefault();
-    if (typeof e.stopPropagation === 'function') e.stopPropagation();
-  }
+  console.log('Player click triggered. Started: ' + streamStarted + ', Connecting: ' + isConnecting);
 
-  console.log('Play/Pause action initiated by user');
-
-  if (streamStarted) {
+  if (!connectionStarted) {
+    // 1. Initial click: Start the connection sequence
+    connectionStarted = true;
+    isConnecting = true;
+    currentAttempt = 0;
+    tryNextPlaybackMethod(true); // User gesture = true (starts unmuted)
+  } else if (isConnecting) {
+    // 2. Currently connecting: Ignore click to prevent aborting/restarting the connection
+    console.log('Stream is connecting. Ignoring click.');
+  } else if (streamStarted) {
+    // 3. Playback active: standard play/pause toggle
     if (video.paused) {
-      video.muted = false; // Unmute on click
-      try {
-        var p = video.play();
-        if (p !== undefined && typeof p.then === 'function') {
-          p.then(function () {
-            playBtn.classList.add('hidden');
-          }).catch(function (err) {
-            console.error('Play failed:', err);
-          });
-        } else {
-          playBtn.classList.add('hidden');
-        }
-      } catch (err) {
-        console.error('Play failed synchronously:', err);
-      }
+      video.muted = false;
+      video.play().catch(function() {});
     } else {
       video.pause();
     }
-  } else {
-    // If not started yet, restart the playback sequence with user gesture mode (unmuted)
-    currentAttempt = 0;
-    tryNextPlaybackMethod(true);
   }
 }
 
-// Bind events to the play button
-playBtn.addEventListener('click', handlePlayAction, true);
-playBtn.addEventListener('touchend', handlePlayAction, true);
-if (playBtn.addEventListener) {
-  playBtn.addEventListener('pointerup', handlePlayAction, true);
-}
-playBtn.addEventListener('keydown', function (e) {
+// Bind click event to the player wrapper (landing area)
+playerWrapper.addEventListener('click', handlePlayerClick);
+playerWrapper.addEventListener('touchend', handlePlayerClick);
+
+// Also handle keyboard navigation (Enter/Space)
+playerWrapper.addEventListener('keydown', function(e) {
   if (e.key === 'Enter' || e.key === ' ' || e.keyCode === 13 || e.keyCode === 32) {
-    handlePlayAction(e);
+    handlePlayerClick(e);
   }
-}, true);
-
-// Video element click fallback
-video.addEventListener('click', function () {
-  handlePlayAction();
 });
 
-// Sync play button UI with actual video state
-video.addEventListener('play', function () {
-  playBtn.textContent = '❚❚';
-  playBtn.classList.add('hidden');
+// Update status overlay text based on HTML5 video events
+video.addEventListener('waiting', function() {
+  if (streamStarted) {
+    setStatus('جاري التحميل...', 'buffering');
+  }
 });
 
-video.addEventListener('pause', function () {
-  playBtn.textContent = '▶';
-  playBtn.classList.remove('hidden');
-});
-
-video.addEventListener('waiting', function () {
-  setStatus('Buffering...');
-});
-
-video.addEventListener('playing', function () {
+video.addEventListener('playing', function() {
+  isConnecting = false;
+  streamStarted = true;
   setStatus('Live', 'connected');
-  playBtn.classList.add('hidden');
 });
 
-// Initial auto-start on load (muted)
-tryNextPlaybackMethod(false);
+video.addEventListener('pause', function() {
+  if (streamStarted) {
+    setStatus('مؤقت (اضغط للاستئناف)', 'paused');
+  }
+});
+
+video.addEventListener('play', function() {
+  if (streamStarted) {
+    setStatus('Live', 'connected');
+  }
+});
