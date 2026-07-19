@@ -100,31 +100,48 @@ body {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 72px;
-  height: 72px;
+  width: 80px;
+  height: 80px;
   border-radius: 50%;
   border: 3px solid rgba(255, 255, 255, 0.9);
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.7);
   color: #fff;
-  font-size: 1.8rem;
+  font-size: 2rem;
   cursor: pointer;
-  z-index: 10;
+  z-index: 100;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s, transform 0.2s;
+  transition: background 0.2s, transform 0.2s, opacity 0.3s;
   backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   line-height: 1;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
-.play-btn:hover {
+.play-btn:hover,
+.play-btn:focus {
   background: rgba(255, 0, 64, 0.7);
   transform: translate(-50%, -50%) scale(1.1);
+  outline: 3px solid rgba(255, 255, 255, 0.5);
+  outline-offset: 4px;
+}
+
+.play-btn:active {
+  transform: translate(-50%, -50%) scale(0.95);
+  background: rgba(255, 0, 64, 0.9);
 }
 
 .play-btn.hidden {
   opacity: 0;
   pointer-events: none;
+  visibility: hidden;
 }
 
 .info {
