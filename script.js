@@ -13,7 +13,18 @@ const PROXY_URL = isHttps ? '/api/stream' : STREAM_URL;
 
 let player = null;
 let streamStarted = false;
+let currentAttempt = 0;
+let retryTimeout = null;
 
+// Define the playback methods we will try in sequence
+const PLAYBACK_METHODS = [
+  { name: 'MPEGTS Proxy', useMpegts: true, url: PROXY_URL },
+  { name: 'MPEGTS Direct', useMpegts: true, url: STREAM_URL },
+  { name: 'Native Proxy', useMpegts: false, url: PROXY_URL },
+  { name: 'Native Direct', useMpegts: false, url: STREAM_URL }
+];
+
+// Clean up helper
 function destroyPlayer() {
   if (player) {
     try {
@@ -22,232 +33,219 @@ function destroyPlayer() {
       player.detachMediaElement();
       player.destroy();
     } catch (e) {
-      console.warn('Error destroying player:', e);
+      console.warn('Error destroying mpegts player:', e);
     }
     player = null;
   }
+  
+  // Reset native video element state
+  video.removeAttribute('src');
+  try {
+    video.load();
+  } catch (e) {}
+  
   streamStarted = false;
 }
 
-function startStream(url, isUserGesture) {
-  // Always destroy existing player first
+function tryNextPlaybackMethod() {
+  if (retryTimeout) {
+    clearTimeout(retryTimeout);
+    retryTimeout = null;
+  }
+
   destroyPlayer();
 
+  // If we exhausted all methods, wrap around and try again from the beginning
+  if (currentAttempt >= PLAYBACK_METHODS.length) {
+    currentAttempt = 0;
+  }
+
+  const method = PLAYBACK_METHODS[currentAttempt];
+  
+  // Skip duplicate methods (e.g. if PROXY_URL is same as STREAM_URL, or if it is file:// and proxy won't work)
+  const isFileProtocol = location.protocol === 'file:';
+  if ((method.url === PROXY_URL && isHttps === false && currentAttempt % 2 === 0) || 
+      (method.url === PROXY_URL && isFileProtocol)) {
+    console.log(`Skipping redundant method: ${method.name}`);
+    currentAttempt++;
+    tryNextPlaybackMethod();
+    return;
+  }
+
+  console.log(`Attempting playback method ${currentAttempt + 1}/${PLAYBACK_METHODS.length}: ${method.name}`);
+  setStatus(`Connecting (${method.name})...`);
+
+  // Ensure video is muted for autoplay support
   video.muted = true;
 
-  if (typeof mpegts !== 'undefined' && mpegts.isSupported()) {
-    player = mpegts.createPlayer({
-      type: 'mpegts',
-      url: url,
-      isLive: true,
-    }, {
-      enableWorker: false,
-      liveBufferLatencyChasing: true,
-      liveBufferLatencyMaxLatency: 1.5,
-      liveBufferLatencyMinRemain: 0.3,
-    });
-
-    player.attachMediaElement(video);
-    player.load();
-
-    // Attempt to play - works for muted or after user gesture
-    var playPromise = video.play();
-    if (playPromise !== undefined) {
-      playPromise.then(function() {
-        streamStarted = true;
-        playBtn.classList.add('hidden');
-        setStatus('Live', 'connected');
-      }).catch(function(e) {
-        console.log('Play attempt failed:', e.message);
-        // Show play button so user can tap to start
-        playBtn.classList.remove('hidden');
-        playBtn.textContent = '▶';
-        streamStarted = false;
+  if (method.useMpegts && typeof mpegts !== 'undefined' && mpegts.isSupported()) {
+    try {
+      player = mpegts.createPlayer({
+        type: 'mpegts',
+        url: method.url,
+        isLive: true,
+      }, {
+        enableWorker: false,
+        lazyLoad: false,
+        autoCleanupSourceBuffer: true,
+        // Disable aggressive latency chasing to prevent constant buffer underflows on TV/slow connections
+        liveBufferLatencyChasing: false,
       });
-    } else {
-      // Old browser without promise support - assume it works
-      streamStarted = true;
-      playBtn.classList.add('hidden');
-    }
 
-    player.on(mpegts.Events.ERROR, function(errorType, errorDetail, errorInfo) {
-      console.error('Stream error:', errorType, errorDetail, errorInfo);
-      setStatus('Stream error - retrying...', 'error');
-      setTimeout(function() {
-        startStream(url, false);
-      }, 3000);
-    });
+      player.attachMediaElement(video);
+      player.load();
 
-    player.on(mpegts.Events.STATISTICS_INFO, function() {
-      if (!streamStarted) {
-        streamStarted = true;
-      }
-      setStatus('Live', 'connected');
-    });
+      // Listen to events
+      player.on(mpegts.Events.ERROR, function(errorType, errorDetail, errorInfo) {
+        console.error(`MPEGTS Error in ${method.name}:`, errorType, errorDetail, errorInfo);
+        scheduleNextAttempt();
+      });
 
-    player.on(mpegts.Events.LOADING_COMPLETE, function() {
-      setStatus('Stream ended - reconnecting...');
-      setTimeout(function() {
-        startStream(url, false);
-      }, 3000);
-    });
-
-  } else {
-    // Fallback: direct src assignment (Safari, some TV browsers)
-    video.src = url;
-    video.load();
-
-    video.onloadeddata = function() {
-      var p = video.play();
-      if (p && p.then) {
-        p.then(function() {
+      player.on(mpegts.Events.STATISTICS_INFO, function() {
+        if (!streamStarted) {
           streamStarted = true;
-          playBtn.classList.add('hidden');
           setStatus('Live', 'connected');
-        }).catch(function() {
+          playBtn.classList.add('hidden');
+        }
+      });
+
+      player.on(mpegts.Events.LOADING_COMPLETE, function() {
+        console.log(`MPEGTS Loading complete (end of stream) in ${method.name}`);
+        scheduleNextAttempt();
+      });
+
+      // Play command
+      var playPromise = video.play();
+      if (playPromise !== undefined) {
+        playPromise.then(function() {
+          // Success playing muted
+          console.log(`Playing successfully using ${method.name}`);
+        }).catch(function(err) {
+          console.log(`Autoplay blocked or failed for ${method.name}:`, err.message);
+          // Show play button so user can manually trigger
           playBtn.classList.remove('hidden');
+          playBtn.textContent = '▶';
         });
       }
-    };
 
-    video.onerror = function() {
-      setStatus('Stream unavailable', 'error');
-    };
+    } catch (e) {
+      console.error(`Failed to initialize mpegts player for ${method.name}:`, e);
+      scheduleNextAttempt();
+    }
+  } else {
+    // Native HTML5 video player fallback
+    try {
+      video.src = method.url;
+      video.load();
+
+      video.onloadeddata = function() {
+        var playPromise = video.play();
+        if (playPromise !== undefined) {
+          playPromise.then(function() {
+            console.log(`Playing successfully using native ${method.name}`);
+            streamStarted = true;
+            setStatus('Live (Native)', 'connected');
+            playBtn.classList.add('hidden');
+          }).catch(function(err) {
+            console.log(`Native autoplay blocked/failed for ${method.name}:`, err.message);
+            playBtn.classList.remove('hidden');
+          });
+        } else {
+          // Old browser support
+          streamStarted = true;
+          setStatus('Live (Native)', 'connected');
+          playBtn.classList.add('hidden');
+        }
+      };
+
+      video.onerror = function(err) {
+        console.error(`Native video error in ${method.name}:`, video.error ? video.error.code : err);
+        scheduleNextAttempt();
+      };
+
+    } catch (e) {
+      console.error(`Failed to set native src for ${method.name}:`, e);
+      scheduleNextAttempt();
+    }
   }
 }
 
+function scheduleNextAttempt() {
+  if (retryTimeout) return; // already scheduled
+  
+  setStatus('Buffering / Reconnecting...');
+  
+  retryTimeout = setTimeout(function() {
+    retryTimeout = null;
+    currentAttempt++;
+    tryNextPlaybackMethod();
+  }, 2000); // Wait 2s before trying next method
+}
+
 // ============================================================
-// PLAY BUTTON - works on TV remotes, touch, mouse, keyboard
+// PLAY BUTTON HANDLER (with user gesture propagation)
 // ============================================================
 function handlePlayAction(e) {
   if (e) {
     e.preventDefault();
     e.stopPropagation();
-    e.stopImmediatePropagation();
   }
 
-  console.log('Play button activated');
+  console.log('Play/Pause triggered by user');
 
-  // If video is playing, pause it
-  if (!video.paused && streamStarted) {
-    video.pause();
-    return;
-  }
-
-  // Always restart the full pipeline on user gesture
-  // This is critical for TV browsers - they need the entire
-  // play() call chain to happen within a user gesture context
-  setStatus('Connecting...');
-  destroyPlayer();
-
-  video.muted = true;
-
-  if (typeof mpegts !== 'undefined' && mpegts.isSupported()) {
-    player = mpegts.createPlayer({
-      type: 'mpegts',
-      url: PROXY_URL,
-      isLive: true,
-    }, {
-      enableWorker: false,
-      liveBufferLatencyChasing: true,
-      liveBufferLatencyMaxLatency: 1.5,
-      liveBufferLatencyMinRemain: 0.3,
-    });
-
-    player.attachMediaElement(video);
-    player.load();
-
-    // CRITICAL: call play() immediately in the same user gesture stack
-    var playPromise = video.play();
-    if (playPromise !== undefined) {
-      playPromise.then(function() {
-        streamStarted = true;
+  // If video is loaded and paused, play it and unmute
+  if (streamStarted) {
+    if (video.paused) {
+      video.muted = false; // Unmute on explicit user interaction
+      video.play().then(function() {
         playBtn.classList.add('hidden');
-        setStatus('Live', 'connected');
       }).catch(function(err) {
-        console.error('Play failed after gesture:', err.message);
-        // Try again with a tiny delay (some TV browsers need this)
-        setTimeout(function() {
-          video.play().then(function() {
-            streamStarted = true;
-            playBtn.classList.add('hidden');
-            setStatus('Live', 'connected');
-          }).catch(function(err2) {
-            console.error('Retry play also failed:', err2.message);
-            setStatus('Tap video to play', 'error');
-          });
-        }, 500);
+        console.error('Play failed:', err);
       });
     } else {
-      streamStarted = true;
-      playBtn.classList.add('hidden');
+      video.pause();
     }
-
-    player.on(mpegts.Events.ERROR, function(errorType, errorDetail, errorInfo) {
-      console.error('Stream error:', errorType, errorDetail, errorInfo);
-      setStatus('Stream error - retrying...', 'error');
-      setTimeout(function() {
-        startStream(PROXY_URL, false);
-      }, 3000);
-    });
-
-    player.on(mpegts.Events.STATISTICS_INFO, function() {
-      streamStarted = true;
-      setStatus('Live', 'connected');
-    });
-
-    player.on(mpegts.Events.LOADING_COMPLETE, function() {
-      setStatus('Stream ended - reconnecting...');
-      setTimeout(function() {
-        startStream(PROXY_URL, false);
-      }, 3000);
-    });
-
   } else {
-    // Fallback for browsers without MediaSource
-    video.src = PROXY_URL;
-    video.load();
-    var p = video.play();
-    if (p && p.then) {
-      p.then(function() {
-        streamStarted = true;
-        playBtn.classList.add('hidden');
-        setStatus('Live', 'connected');
-      }).catch(function() {
-        setStatus('Cannot autoplay', 'error');
-      });
-    }
+    // If stream is not running yet, restart the playback sequence from beginning
+    currentAttempt = 0;
+    tryNextPlaybackMethod();
+    
+    // Give it a moment to initialize, then attempt to unmute and play
+    setTimeout(function() {
+      video.muted = false;
+      video.play().catch(function() {});
+    }, 100);
   }
 }
 
-// Bind ALL possible interaction events for maximum TV compatibility
+// Bind events to the play button
 playBtn.addEventListener('click', handlePlayAction, true);
 playBtn.addEventListener('touchend', handlePlayAction, true);
 playBtn.addEventListener('pointerup', handlePlayAction, true);
 playBtn.addEventListener('keydown', function(e) {
-  // TV remotes send Enter or Space key
   if (e.key === 'Enter' || e.key === ' ' || e.keyCode === 13 || e.keyCode === 32) {
     handlePlayAction(e);
   }
 }, true);
 
-// Also make the entire player wrapper clickable as fallback
-document.querySelector('.player-wrapper').addEventListener('click', function(e) {
-  // Only handle if the click was NOT on the play button itself
-  if (e.target === playBtn || playBtn.contains(e.target)) return;
-
-  if (video.paused || !streamStarted) {
-    handlePlayAction(e);
+// Video element click fallback
+video.addEventListener('click', function() {
+  if (streamStarted) {
+    if (video.paused) {
+      video.muted = false;
+      video.play().catch(function() {});
+    } else {
+      video.pause();
+    }
   } else {
-    video.pause();
+    handlePlayAction();
   }
 });
 
-// Video state listeners
+// Sync play button UI with actual video state
 video.addEventListener('play', function() {
   playBtn.textContent = '❚❚';
   playBtn.classList.add('hidden');
-  streamStarted = true;
 });
 
 video.addEventListener('pause', function() {
@@ -256,7 +254,7 @@ video.addEventListener('pause', function() {
 });
 
 video.addEventListener('waiting', function() {
-  setStatus('Buffering...', '');
+  setStatus('Buffering...');
 });
 
 video.addEventListener('playing', function() {
@@ -264,29 +262,15 @@ video.addEventListener('playing', function() {
   playBtn.classList.add('hidden');
 });
 
-// Prevent duplicate fires from touch+click on same element
+// Debouncing for click/touch events to prevent double fires
 var lastPlayTime = 0;
-var origHandler = handlePlayAction;
+const originalPlayAction = handlePlayAction;
 handlePlayAction = function(e) {
   var now = Date.now();
-  if (now - lastPlayTime < 500) return; // debounce 500ms
+  if (now - lastPlayTime < 500) return;
   lastPlayTime = now;
-  origHandler(e);
+  originalPlayAction(e);
 };
 
-// Re-bind with debounced version
-playBtn.removeEventListener('click', origHandler, true);
-playBtn.removeEventListener('touchend', origHandler, true);
-playBtn.removeEventListener('pointerup', origHandler, true);
-playBtn.addEventListener('click', handlePlayAction, true);
-playBtn.addEventListener('touchend', handlePlayAction, true);
-playBtn.addEventListener('pointerup', handlePlayAction, true);
-playBtn.addEventListener('keydown', function(e) {
-  if (e.key === 'Enter' || e.key === ' ' || e.keyCode === 13 || e.keyCode === 32) {
-    handlePlayAction(e);
-  }
-}, true);
-
-// Auto-start on page load (will work if browser allows muted autoplay)
-setStatus('Connecting...');
-startStream(PROXY_URL, false);
+// Initial auto-start
+tryNextPlaybackMethod();
