@@ -7,7 +7,7 @@ export default function handler(req, res) {
     return;
   }
 
-  var STREAM_URL = 'http://ugeen.live:8080/Ugeen_VIPtHEG0y/1hLFbj/4526';
+  var STREAM_URL = 'http://ugeen.live:8080/Ugeen_VIPtHEG0y/1hLFbj/4527';
 
   var proxyReq = http.get(STREAM_URL, function(proxyRes) {
     if (proxyRes.statusCode !== 200) {
@@ -16,13 +16,16 @@ export default function handler(req, res) {
       return;
     }
 
+    // Critical: 'X-Accel-Buffering': 'no' tells Vercel/Nginx proxy NOT to buffer
+    // the response, enabling true chunk-by-chunk live streaming to the browser.
     res.writeHead(200, {
       'Content-Type': 'video/MP2T',
       'Access-Control-Allow-Origin': '*',
       'Cache-Control': 'no-cache, no-store, must-revalidate',
       'Pragma': 'no-cache',
       'Expires': '0',
-      'Connection': 'keep-alive'
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no' 
     });
 
     proxyRes.pipe(res);
@@ -36,7 +39,7 @@ export default function handler(req, res) {
     } catch (e) {}
   });
 
-  // Critical: close the upstream connection if the user closes the stream/tab
+  // Close upstream connection if client disconnects
   req.on('close', function() {
     proxyReq.destroy();
   });

@@ -1,4 +1,4 @@
-var STREAM_URL = 'http://ugeen.live:8080/Ugeen_VIPtHEG0y/1hLFbj/4530';
+var STREAM_URL = 'http://ugeen.live:8080/Ugeen_VIPtHEG0y/1hLFbj/4527';
 var video = document.getElementById('video');
 var statusEl = document.getElementById('status');
 var playBtn = document.getElementById('playBtn');
@@ -17,13 +17,37 @@ var currentAttempt = 0;
 var retryTimeout = null;
 var lastPlayTime = 0; // Global debounce tracker
 
-// Define the playback methods to try in sequence (Fully ES5 compatible)
-var PLAYBACK_METHODS = [
-  { name: 'MPEGTS Proxy', useMpegts: true, url: PROXY_URL },
-  { name: 'MPEGTS Direct', useMpegts: true, url: STREAM_URL },
-  { name: 'Native Proxy', useMpegts: false, url: PROXY_URL },
-  { name: 'Native Direct', useMpegts: false, url: STREAM_URL }
-];
+// Smart TV Detection (ES5 compatible)
+var ua = navigator.userAgent.toLowerCase();
+var isSmartTV = ua.indexOf('smarttv') > -1 || 
+                ua.indexOf('tizen') > -1 || 
+                ua.indexOf('webos') > -1 || 
+                ua.indexOf('smart-tv') > -1 || 
+                ua.indexOf('lgbrowser') > -1 || 
+                ua.indexOf('tv') > -1 || 
+                ua.indexOf('appletv') > -1 || 
+                ua.indexOf('googletv') > -1 || 
+                ua.indexOf('roku') > -1;
+
+console.log('Device Type: ' + (isSmartTV ? 'Smart TV' : 'PC/Mobile'));
+
+// Define the playback methods (TVs prioritize Native Direct, PCs prioritize MPEGTS Proxy)
+var PLAYBACK_METHODS = [];
+if (isSmartTV) {
+  PLAYBACK_METHODS = [
+    { name: 'Native Direct', useMpegts: false, url: STREAM_URL },
+    { name: 'Native Proxy', useMpegts: false, url: PROXY_URL },
+    { name: 'MPEGTS Direct', useMpegts: true, url: STREAM_URL },
+    { name: 'MPEGTS Proxy', useMpegts: true, url: PROXY_URL }
+  ];
+} else {
+  PLAYBACK_METHODS = [
+    { name: 'MPEGTS Proxy', useMpegts: true, url: PROXY_URL },
+    { name: 'MPEGTS Direct', useMpegts: true, url: STREAM_URL },
+    { name: 'Native Proxy', useMpegts: false, url: PROXY_URL },
+    { name: 'Native Direct', useMpegts: false, url: STREAM_URL }
+  ];
+}
 
 // Clean up helper
 function destroyPlayer() {
@@ -43,7 +67,7 @@ function destroyPlayer() {
   video.removeAttribute('src');
   try {
     video.load();
-  } catch (e) {}
+  } catch (e) { }
   
   streamStarted = false;
 }
@@ -97,12 +121,12 @@ function tryNextPlaybackMethod(isUserGesture) {
       player.load();
 
       // Listen to mpegts events
-      player.on(mpegts.Events.ERROR, function(errorType, errorDetail, errorInfo) {
+      player.on(mpegts.Events.ERROR, function (errorType, errorDetail, errorInfo) {
         console.error('MPEGTS Error in ' + method.name + ':', errorType, errorDetail, errorInfo);
         scheduleNextAttempt();
       });
 
-      player.on(mpegts.Events.STATISTICS_INFO, function() {
+      player.on(mpegts.Events.STATISTICS_INFO, function () {
         if (!streamStarted) {
           streamStarted = true;
           setStatus('Live', 'connected');
@@ -110,7 +134,7 @@ function tryNextPlaybackMethod(isUserGesture) {
         }
       });
 
-      player.on(mpegts.Events.LOADING_COMPLETE, function() {
+      player.on(mpegts.Events.LOADING_COMPLETE, function () {
         console.log('MPEGTS Loading complete in ' + method.name);
         scheduleNextAttempt();
       });
@@ -119,9 +143,9 @@ function tryNextPlaybackMethod(isUserGesture) {
       try {
         var playPromise = video.play();
         if (playPromise !== undefined && typeof playPromise.then === 'function') {
-          playPromise.then(function() {
+          playPromise.then(function () {
             console.log('Playing successfully using ' + method.name);
-          }).catch(function(err) {
+          }).catch(function (err) {
             console.log('Autoplay blocked for ' + method.name + ':', err.message);
             playBtn.classList.remove('hidden');
             playBtn.textContent = '▶';
@@ -143,16 +167,16 @@ function tryNextPlaybackMethod(isUserGesture) {
       video.src = method.url;
       video.load();
 
-      video.onloadeddata = function() {
+      video.onloadeddata = function () {
         try {
           var playPromise = video.play();
           if (playPromise !== undefined && typeof playPromise.then === 'function') {
-            playPromise.then(function() {
+            playPromise.then(function () {
               console.log('Playing successfully using native ' + method.name);
               streamStarted = true;
               setStatus('Live (Native)', 'connected');
               playBtn.classList.add('hidden');
-            }).catch(function(err) {
+            }).catch(function (err) {
               console.log('Native autoplay blocked for ' + method.name + ':', err.message);
               playBtn.classList.remove('hidden');
             });
@@ -167,7 +191,7 @@ function tryNextPlaybackMethod(isUserGesture) {
         }
       };
 
-      video.onerror = function(err) {
+      video.onerror = function (err) {
         console.error('Native video error in ' + method.name + ':', video.error ? video.error.code : err);
         scheduleNextAttempt();
       };
@@ -185,7 +209,7 @@ function scheduleNextAttempt() {
   setStatus('Buffering / Reconnecting...');
   
   // Wait 8 seconds to allow buffering
-  retryTimeout = setTimeout(function() {
+  retryTimeout = setTimeout(function () {
     retryTimeout = null;
     currentAttempt++;
     tryNextPlaybackMethod(false);
@@ -221,9 +245,9 @@ function handlePlayAction(e) {
       try {
         var p = video.play();
         if (p !== undefined && typeof p.then === 'function') {
-          p.then(function() {
+          p.then(function () {
             playBtn.classList.add('hidden');
-          }).catch(function(err) {
+          }).catch(function (err) {
             console.error('Play failed:', err);
           });
         } else {
@@ -248,33 +272,33 @@ playBtn.addEventListener('touchend', handlePlayAction, true);
 if (playBtn.addEventListener) {
   playBtn.addEventListener('pointerup', handlePlayAction, true);
 }
-playBtn.addEventListener('keydown', function(e) {
+playBtn.addEventListener('keydown', function (e) {
   if (e.key === 'Enter' || e.key === ' ' || e.keyCode === 13 || e.keyCode === 32) {
     handlePlayAction(e);
   }
 }, true);
 
 // Video element click fallback
-video.addEventListener('click', function() {
+video.addEventListener('click', function () {
   handlePlayAction();
 });
 
 // Sync play button UI with actual video state
-video.addEventListener('play', function() {
+video.addEventListener('play', function () {
   playBtn.textContent = '❚❚';
   playBtn.classList.add('hidden');
 });
 
-video.addEventListener('pause', function() {
+video.addEventListener('pause', function () {
   playBtn.textContent = '▶';
   playBtn.classList.remove('hidden');
 });
 
-video.addEventListener('waiting', function() {
+video.addEventListener('waiting', function () {
   setStatus('Buffering...');
 });
 
-video.addEventListener('playing', function() {
+video.addEventListener('playing', function () {
   setStatus('Live', 'connected');
   playBtn.classList.add('hidden');
 });
