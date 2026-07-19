@@ -1,6 +1,6 @@
-import http from 'http';
+const http = require('http');
 
-export default function handler(req, res) {
+module.exports = function(req, res) {
   if (req.method !== 'GET') {
     res.writeHead(405, { 'Content-Type': 'text/plain' });
     res.end('Method not allowed');
@@ -16,8 +16,6 @@ export default function handler(req, res) {
       return;
     }
 
-    // Critical: 'X-Accel-Buffering': 'no' tells Vercel/Nginx proxy NOT to buffer
-    // the response, enabling true chunk-by-chunk live streaming to the browser.
     res.writeHead(200, {
       'Content-Type': 'video/MP2T',
       'Access-Control-Allow-Origin': '*',
@@ -25,7 +23,7 @@ export default function handler(req, res) {
       'Pragma': 'no-cache',
       'Expires': '0',
       'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no' 
+      'X-Accel-Buffering': 'no'
     });
 
     proxyRes.pipe(res);
@@ -43,4 +41,4 @@ export default function handler(req, res) {
   req.on('close', function() {
     proxyReq.destroy();
   });
-}
+};

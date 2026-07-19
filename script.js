@@ -201,12 +201,12 @@ function scheduleNextAttempt() {
   // Keep displaying connecting/loading status to avoid confusing the user
   setStatus('جاري الاتصال...', 'connecting');
   
-  // Wait 8 seconds before trying next method silently
+  // Wait 2 seconds before trying next method silently (faster recovery)
   retryTimeout = setTimeout(function() {
     retryTimeout = null;
     currentAttempt++;
     tryNextPlaybackMethod(false);
-  }, 8000);
+  }, 2000);
 }
 
 // ============================================================
