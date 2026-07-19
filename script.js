@@ -15,6 +15,7 @@ var player = null;
 var streamStarted = false;
 var currentAttempt = 0;
 var retryTimeout = null;
+var lastPlayTime = 0; // Global debounce tracker
 
 // Define the playback methods to try in sequence (Fully ES5 compatible)
 var PLAYBACK_METHODS = [
@@ -47,7 +48,7 @@ function destroyPlayer() {
   streamStarted = false;
 }
 
-function tryNextPlaybackMethod() {
+function tryNextPlaybackMethod(isUserGesture) {
   if (retryTimeout) {
     clearTimeout(retryTimeout);
     retryTimeout = null;
@@ -68,15 +69,16 @@ function tryNextPlaybackMethod() {
       (method.url === PROXY_URL && isFileProtocol)) {
     console.log('Skipping redundant method: ' + method.name);
     currentAttempt++;
-    tryNextPlaybackMethod();
+    tryNextPlaybackMethod(isUserGesture);
     return;
   }
 
   console.log('Attempting playback method ' + (currentAttempt + 1) + '/' + PLAYBACK_METHODS.length + ': ' + method.name);
   setStatus('Connecting (' + method.name + ')...');
 
-  // Ensure video is muted for autoplay support
-  video.muted = true;
+  // If triggered by a user gesture, unmute the video to play with audio.
+  // Otherwise, mute it to ensure autoplay works.
+  video.muted = !isUserGesture;
 
   if (method.useMpegts && typeof mpegts !== 'undefined' && mpegts.isSupported()) {
     try {
@@ -182,28 +184,40 @@ function scheduleNextAttempt() {
   
   setStatus('Buffering / Reconnecting...');
   
-  // Increased delay to 8 seconds to give slow TV browsers enough time to build buffer
+  // Wait 8 seconds to allow buffering
   retryTimeout = setTimeout(function() {
     retryTimeout = null;
     currentAttempt++;
-    tryNextPlaybackMethod();
+    tryNextPlaybackMethod(false);
   }, 8000);
 }
 
 // ============================================================
-// PLAY BUTTON HANDLER (ES5 compliant)
+// PLAY BUTTON HANDLER (ES5 compliant with internal debounce)
 // ============================================================
 function handlePlayAction(e) {
+  // Prevent duplicate events (e.g. touchstart + click) firing within 800ms
+  var now = Date.now();
+  if (now - lastPlayTime < 800) {
+    console.log('Duplicate play trigger ignored.');
+    if (e) {
+      if (typeof e.preventDefault === 'function') e.preventDefault();
+      if (typeof e.stopPropagation === 'function') e.stopPropagation();
+    }
+    return;
+  }
+  lastPlayTime = now;
+
   if (e) {
     if (typeof e.preventDefault === 'function') e.preventDefault();
     if (typeof e.stopPropagation === 'function') e.stopPropagation();
   }
 
-  console.log('Play/Pause triggered by user');
+  console.log('Play/Pause action initiated by user');
 
   if (streamStarted) {
     if (video.paused) {
-      video.muted = false; // Unmute on explicit user click
+      video.muted = false; // Unmute on click
       try {
         var p = video.play();
         if (p !== undefined && typeof p.then === 'function') {
@@ -222,19 +236,9 @@ function handlePlayAction(e) {
       video.pause();
     }
   } else {
-    // Restart the playback sequence from beginning
+    // If not started yet, restart the playback sequence with user gesture mode (unmuted)
     currentAttempt = 0;
-    tryNextPlaybackMethod();
-    
-    setTimeout(function() {
-      video.muted = false;
-      try {
-        var p = video.play();
-        if (p !== undefined && typeof p.then === 'function') {
-          p.catch(function() {});
-        }
-      } catch (e) {}
-    }, 150);
+    tryNextPlaybackMethod(true);
   }
 }
 
@@ -252,18 +256,7 @@ playBtn.addEventListener('keydown', function(e) {
 
 // Video element click fallback
 video.addEventListener('click', function() {
-  if (streamStarted) {
-    if (video.paused) {
-      video.muted = false;
-      try {
-        video.play();
-      } catch (e) {}
-    } else {
-      video.pause();
-    }
-  } else {
-    handlePlayAction();
-  }
+  handlePlayAction();
 });
 
 // Sync play button UI with actual video state
@@ -286,15 +279,5 @@ video.addEventListener('playing', function() {
   playBtn.classList.add('hidden');
 });
 
-// Debounce click/touch events to prevent double fires
-var lastPlayTime = 0;
-var originalPlayAction = handlePlayAction;
-handlePlayAction = function(e) {
-  var now = Date.now();
-  if (now - lastPlayTime < 500) return;
-  lastPlayTime = now;
-  originalPlayAction(e);
-};
-
-// Initial auto-start
-tryNextPlaybackMethod();
+// Initial auto-start on load (muted)
+tryNextPlaybackMethod(false);
